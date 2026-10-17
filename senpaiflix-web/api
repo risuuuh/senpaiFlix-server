@@ -1,0 +1,90 @@
+
+import { NextResponse } from "next/server";
+
+export const revalidate = 3600;
+
+const QUERY = `
+  query {
+    Page(page: 1, perPage: 24) {
+      media(
+        type: ANIME
+        sort: POPULARITY_DESC
+        isAdult: false
+      ) {
+        id
+        title {
+          english
+          romaji
+        }
+        description(asHtml: false)
+        coverImage {
+          extraLarge
+          large
+        }
+        averageScore
+        episodes
+        seasonYear
+        genres
+      }
+    }
+  }
+`;
+
+export async function GET() {
+  try {
+    const response = await fetch("https://graphql.anilist.co", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify({ query: QUERY }),
+      next: { revalidate: 3600 },
+    });
+
+    if (!response.ok) {
+      return NextResponse.json(
+        { error: "Anime metadata service is temporarily unavailable." },
+        { status: 502 }
+      );
+    }
+
+    const result = await response.json();
+
+    if (result.errors || !result.data?.Page?.media) {
+      return NextResponse.json(
+        { error: "Could not load anime metadata." },
+        { status: 502 }
+      );
+    }
+
+    const anime = result.data.Page.media.map((item: {
+      id: number;
+      title: { english: string | null; romaji: string };
+      description: string | null;
+      coverImage: { extraLarge: string; large: string };
+      averageScore: number | null;
+      episodes: number | null;
+      seasonYear: number | null;
+      genres: string[];
+    }) => ({
+      id: item.id,
+      title: item.title.english || item.title.romaji,
+      description: item.description || "No description available.",
+      image: item.coverImage.extraLarge || item.coverImage.large,
+      rating: item.averageScore
+        ? (item.averageScore / 10).toFixed(1)
+        : "N/A",
+      episodes: item.episodes ?? 0,
+      year: item.seasonYear?.toString() ?? "Unknown",
+      genre: item.genres.slice(0, 2).join(" · ") || "Anime",
+    }));
+
+    return NextResponse.json({ anime });
+  } catch {
+    return NextResponse.json(
+      { error: "Unable to connect to the anime metadata service." },
+      { status: 502 }
+    );
+  }
+}
