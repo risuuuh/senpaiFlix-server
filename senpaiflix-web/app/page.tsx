@@ -1,7 +1,6 @@
 
 "use client";
 
-import OfficialPlayer from "./components/OfficialPlayer";
 import { useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
@@ -31,6 +30,7 @@ type Anime = {
   description: string;
   embedUrl?: string;
   watchUrl?: string;
+  trailerUrl?: string;
 };
 
 const FALLBACK_ANIME: Anime[] = [
@@ -169,6 +169,8 @@ function normalizeAnime(
       typeof item.embedUrl === "string" ? item.embedUrl : undefined,
     watchUrl:
       typeof item.watchUrl === "string" ? item.watchUrl : undefined,
+    trailerUrl:
+      typeof item.trailerUrl === "string" ? item.trailerUrl : undefined,
   };
 }
 
@@ -745,7 +747,7 @@ export default function Home() {
 
               <div className="border-t border-white/10 p-6 sm:p-8">
                 {(() => {
-                  const raw = selected.embedUrl || selected.watchUrl || "";
+                  const raw = selected.embedUrl || selected.watchUrl || selected.trailerUrl || "";
                   let src = "";
 
                   try {

@@ -27,6 +27,7 @@ const QUERY = `
         episodes
         seasonYear
         genres
+        trailer { id site thumbnail }
       }
     }
   }
@@ -96,6 +97,7 @@ export async function GET(request: Request) {
       episodes: number | null;
       seasonYear: number | null;
       genres: string[];
+      trailer: { id: string | null; site: string | null; thumbnail: string | null } | null;
     }) => ({
       id: item.id,
       title: item.title.english || item.title.romaji,
@@ -107,6 +109,10 @@ export async function GET(request: Request) {
       episodes: item.episodes ?? 0,
       year: item.seasonYear?.toString() ?? "Unknown",
       genre: item.genres.slice(0, 2).join(" · ") || "Anime",
+      trailerUrl:
+        item.trailer?.site === "youtube" && item.trailer.id
+          ? `https://www.youtube-nocookie.com/embed/${item.trailer.id}`
+          : undefined,
     }));
 
     return NextResponse.json({
