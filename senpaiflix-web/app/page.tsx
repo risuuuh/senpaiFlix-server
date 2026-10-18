@@ -671,6 +671,19 @@ export default function Home() {
 
         <span className="mx-2">·</span>
         A universe of stories.
+          <p className="mt-2 text-sm text-white/60">
+            Created by <span className="text-white">Rishu</span>
+            {" · "}
+            <a
+              href="https://www.instagram.com/zero_.amz/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-white/70 transition-colors hover:text-white hover:underline"
+            >
+              Instagram: @zero_.amz
+            </a>
+          </p>
+
 
         <p className="mt-2">
           Anime metadata and video playback are separate services.
