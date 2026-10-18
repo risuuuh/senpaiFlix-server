@@ -744,11 +744,56 @@ export default function Home() {
               </div>
 
               <div className="border-t border-white/10 p-6 sm:p-8">
-                <OfficialPlayer
-                  title={selected.title}
-                  embedUrl={selected.embedUrl}
-                  watchUrl={selected.watchUrl}
-                />
+                {(() => {
+                  const raw = selected.embedUrl || selected.watchUrl || "";
+                  let src = "";
+
+                  try {
+                    const url = new URL(raw);
+                    const host = url.hostname.toLowerCase();
+
+                    if (host === "youtu.be") {
+                      const id = url.pathname.split("/").filter(Boolean)[0];
+                      if (id) src = `https://www.youtube-nocookie.com/embed/${id}`;
+                    } else if (
+                      ["youtube.com", "www.youtube.com", "m.youtube.com"].includes(host)
+                    ) {
+                      const id = url.pathname === "/watch"
+                        ? url.searchParams.get("v")
+                        : url.pathname.startsWith("/embed/")
+                          ? url.pathname.split("/")[2]
+                          : null;
+                      if (id) src = `https://www.youtube-nocookie.com/embed/${id}`;
+                    } else if (
+                      host === "www.youtube-nocookie.com" &&
+                      url.pathname.startsWith("/embed/")
+                    ) {
+                      src = url.href;
+                    } else if (
+                      host === "player.vimeo.com" &&
+                      url.pathname.startsWith("/video/")
+                    ) {
+                      src = url.href;
+                    }
+                  } catch {}
+
+                  return src ? (
+                    <div className="aspect-video w-full overflow-hidden rounded-2xl border border-white/10 bg-black">
+                      <iframe
+                        src={src}
+                        title={`${selected.title} embedded video`}
+                        className="h-full w-full"
+                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                        allowFullScreen
+                        referrerPolicy="strict-origin-when-cross-origin"
+                      />
+                    </div>
+                  ) : (
+                    <div className="flex aspect-video w-full items-center justify-center rounded-2xl border border-white/10 bg-white/[0.03] p-6 text-center text-sm text-white/60">
+                      Embedded video source abhi configured nahi hai.
+                    </div>
+                  );
+                })()}
               </div>
             </motion.div>
           </motion.div>

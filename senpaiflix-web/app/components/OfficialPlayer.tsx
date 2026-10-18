@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Hls from "hls.js";
 
 type PlayerProps = {
@@ -16,24 +16,27 @@ type Episode = {
   videoUrl?: string;
   embedUrl?: string;
   watchUrl?: string;
+  sources?: string[];
 };
 
-type PlayerSource =
+type Source =
   | { kind: "media"; url: string }
-  | { kind: "iframe"; url: string }
-  | null;
+  | { kind: "iframe"; url: string };
 
-function getYouTubeEmbedUrl(raw: string): string | null {
+function getSource(raw?: string): Source | null {
+  if (!raw) return null;
+
   try {
     const url = new URL(raw.trim());
+    if (url.protocol !== "https:") return null;
+
+    const host = url.hostname.toLowerCase();
     let id = "";
 
-    if (url.hostname === "youtu.be") {
+    if (host === "youtu.be") {
       id = url.pathname.split("/").filter(Boolean)[0] ?? "";
     } else if (
-      ["youtube.com", "www.youtube.com", "m.youtube.com"].includes(
-        url.hostname
-      )
+      ["youtube.com", "www.youtube.com", "m.youtube.com"].includes(host)
     ) {
       if (url.pathname === "/watch") {
         id = url.searchParams.get("v") ?? "";
@@ -45,41 +48,28 @@ function getYouTubeEmbedUrl(raw: string): string | null {
       }
     }
 
-    return /^[a-zA-Z0-9_-]{11}$/.test(id)
-      ? `https://www.youtube-nocookie.com/embed/${id}`
-      : null;
-  } catch {
-    return null;
-  }
-}
-
-function getSource(raw?: string): PlayerSource {
-  if (!raw) return null;
-
-  const youtube = getYouTubeEmbedUrl(raw);
-  if (youtube) return { kind: "iframe", url: youtube };
-
-  try {
-    const url = new URL(raw.trim());
-    if (url.protocol !== "https:") return null;
+    if (id && /^[A-Za-z0-9_-]{11}$/.test(id)) {
+      return {
+        kind: "iframe",
+        url: `https://www.youtube-nocookie.com/embed/${id}`,
+      };
+    }
 
     if (
-      ["youtube.com", "www.youtube.com", "www.youtube-nocookie.com"].includes(
-        url.hostname
-      ) &&
-      /^\/embed\/[A-Za-z0-9_-]+$/.test(url.pathname)
+      host === "www.youtube-nocookie.com" &&
+      /^\/embed\/[A-Za-z0-9_-]{11}$/.test(url.pathname)
     ) {
       return { kind: "iframe", url: url.href };
     }
 
     if (
-      url.hostname === "player.vimeo.com" &&
+      host === "player.vimeo.com" &&
       /^\/video\/[0-9]+$/.test(url.pathname)
     ) {
       return { kind: "iframe", url: url.href };
     }
 
-    if (/\.(m3u8|mp4)(?:$)/i.test(url.pathname)) {
+    if (/\.(mp4|m3u8)$/i.test(url.pathname)) {
       return { kind: "media", url: url.href };
     }
 
@@ -89,11 +79,20 @@ function getSource(raw?: string): PlayerSource {
   }
 }
 
-function getSafeWatchUrl(raw?: string): string {
-  if (!raw) return "";
+function getSources(episode: Episode): string[] {
+  return [
+    ...(Array.isArray(episode.sources) ? episode.sources : []),
+    episode.embedUrl ?? "",
+    episode.videoUrl ?? "",
+  ]
+    .map((value) => value.trim())
+    .filter((value, index, all) => value && all.indexOf(value) === index)
+    .filter((value) => getSource(value) !== null);
+}
 
+function safeWatchUrl(raw?: string) {
   try {
-    const url = new URL(raw.trim());
+    const url = new URL(raw ?? "");
     return url.protocol === "https:" ? url.href : "";
   } catch {
     return "";
@@ -106,17 +105,41 @@ export default function OfficialPlayer({
   watchUrl,
 }: PlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const fallbackLock = useRef(false);
+
   const [episodes, setEpisodes] = useState<Episode[]>([]);
   const [selected, setSelected] = useState("");
-  const [source, setSource] = useState<PlayerSource>(
-    () => getSource(embedUrl)
+  const [sources, setSources] = useState<string[]>(() =>
+    embedUrl ? [embedUrl] : []
   );
+  const [sourceIndex, setSourceIndex] = useState(0);
   const [activeWatchUrl, setActiveWatchUrl] = useState(
-    () => getSafeWatchUrl(watchUrl)
+    () => safeWatchUrl(watchUrl)
   );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [retryCount, setRetryCount] = useState(0);
+
+  const source = getSource(sources[sourceIndex]);
+
+  const nextSource = useCallback(
+    (reason: string) => {
+      if (fallbackLock.current) return;
+      fallbackLock.current = true;
+
+      if (sourceIndex + 1 < sources.length) {
+        setError(`${reason} Trying player ${sourceIndex + 2} of ${sources.length}…`);
+        setSourceIndex((index) => index + 1);
+      } else {
+        setError(`${reason} No more sources available. Check the source URL or try again.`);
+      }
+
+      window.setTimeout(() => {
+        fallbackLock.current = false;
+      }, 800);
+    },
+    [sourceIndex, sources.length]
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -126,8 +149,9 @@ export default function OfficialPlayer({
       setError("");
       setEpisodes([]);
       setSelected("");
-      setSource(getSource(embedUrl));
-      setActiveWatchUrl(getSafeWatchUrl(watchUrl));
+      setSources(embedUrl ? [embedUrl] : []);
+      setSourceIndex(0);
+      setActiveWatchUrl(safeWatchUrl(watchUrl));
 
       try {
         const response = await fetch(
@@ -135,28 +159,23 @@ export default function OfficialPlayer({
           { cache: "no-store" }
         );
 
-        if (!response.ok) {
-          throw new Error("Episode catalogue request failed.");
-        }
+        if (!response.ok) throw new Error("Episode request failed");
 
-        const data = (await response.json()) as {
-          episodes?: Episode[];
-        };
+        const data = (await response.json()) as { episodes?: Episode[] };
 
         if (!cancelled) {
           setEpisodes(Array.isArray(data.episodes) ? data.episodes : []);
         }
       } catch {
         if (!cancelled) {
-          setError("Episode list load nahi ho saki. Server check karo.");
+          setError("Episode list load nahi hui. Server check karo.");
         }
       } finally {
         if (!cancelled) setLoading(false);
       }
     }
 
-    loadEpisodes();
-
+    void loadEpisodes();
     return () => {
       cancelled = true;
     };
@@ -164,7 +183,6 @@ export default function OfficialPlayer({
 
   useEffect(() => {
     const video = videoRef.current;
-
     if (!video || source?.kind !== "media") return;
 
     setError("");
@@ -172,25 +190,22 @@ export default function OfficialPlayer({
     video.removeAttribute("src");
     video.load();
 
-    if (/\.m3u8(?:$)/i.test(new URL(source.url).pathname)) {
+    let hls: Hls | undefined;
+
+    if (/\.m3u8$/i.test(new URL(source.url).pathname)) {
       if (video.canPlayType("application/vnd.apple.mpegurl")) {
         video.src = source.url;
         video.load();
       } else if (Hls.isSupported()) {
-        const hls = new Hls();
+        hls = new Hls();
         hls.loadSource(source.url);
         hls.attachMedia(video);
 
         hls.on(Hls.Events.ERROR, (_event, data) => {
           if (data.fatal) {
-            setError(
-              "Stream load nahi ho saka. Source, CORS aur provider permissions check karo."
-            );
-            hls.destroy();
+            nextSource("Stream failed.");
           }
         });
-
-        return () => hls.destroy();
       } else {
         setError("Is browser mein HLS playback supported nahi hai.");
       }
@@ -198,26 +213,27 @@ export default function OfficialPlayer({
       video.src = source.url;
       video.load();
     }
-  }, [source, retryCount]);
+
+    return () => {
+      hls?.destroy();
+    };
+  }, [source?.url, source?.kind, retryCount, nextSource]);
 
   function playEpisode(episode: Episode) {
-    const nextSource = getSource(episode.embedUrl || episode.videoUrl);
-    const externalUrl = getSafeWatchUrl(
-      episode.watchUrl || episode.videoUrl
-    );
+    const list = getSources(episode);
 
-    if (!nextSource) {
-      setError(
-        "Supported HTTPS MP4, HLS, ya provider embed source configure karo."
-      );
+    if (!list.length) {
+      setError("Is episode ke liye valid HTTPS MP4, HLS ya supported embed URL add karo.");
       return;
     }
 
-    setSource(nextSource);
-    setActiveWatchUrl(externalUrl);
+    fallbackLock.current = false;
+    setSources(list);
+    setSourceIndex(0);
     setSelected(`${episode.episodeNumber}:${episode.title}`);
+    setActiveWatchUrl(safeWatchUrl(episode.watchUrl || episode.videoUrl));
     setError("");
-    setRetryCount(0);
+    setRetryCount((count) => count + 1);
   }
 
   const sortedEpisodes = episodes
@@ -231,15 +247,14 @@ export default function OfficialPlayer({
     .sort((a, b) => a.episodeNumber - b.episodeNumber);
 
   const selectedIndex = sortedEpisodes.findIndex(
-    (episode) =>
-      `${episode.episodeNumber}:${episode.title}` === selected
+    (episode) => `${episode.episodeNumber}:${episode.title}` === selected
   );
 
   return (
     <section className="mt-6 w-full space-y-4">
       <div className="flex items-center gap-2 text-xs text-white/60">
         <span className="h-2 w-2 rounded-full bg-white/70" />
-        SenpaiFlix Player
+        SenpaiFlix Multi-Source Player
       </div>
 
       <div className="relative aspect-video w-full overflow-hidden rounded-2xl border border-white/10 bg-black">
@@ -251,11 +266,7 @@ export default function OfficialPlayer({
             controls
             playsInline
             preload="metadata"
-            onError={() =>
-              setError(
-                "Video play nahi hua. URL, format, CORS aur stream access check karo."
-              )
-            }
+            onError={() => nextSource("Video playback failed.")}
           />
         ) : source?.kind === "iframe" ? (
           <iframe
@@ -266,13 +277,13 @@ export default function OfficialPlayer({
             allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
             referrerPolicy="strict-origin-when-cross-origin"
             allowFullScreen
+            onError={() => nextSource("Embedded player failed to load.")}
           />
         ) : (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-6 text-center">
             <p className="text-base font-semibold text-white">{title}</p>
             <p className="max-w-sm text-xs leading-6 text-white/50">
-              Authorized video source configure karne ke baad playback yahan
-              chalega.
+              Admin se authorized video sources add karne ke baad yahan play hoga.
             </p>
           </div>
         )}
@@ -283,22 +294,37 @@ export default function OfficialPlayer({
           type="button"
           disabled={!source}
           onClick={() => {
+            fallbackLock.current = false;
             setError("");
             setRetryCount((count) => count + 1);
           }}
           className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-white transition hover:bg-white/10 disabled:opacity-40"
         >
-          Retry playback
+          Retry player
+        </button>
+
+        <button
+          type="button"
+          disabled={sourceIndex >= sources.length - 1}
+          onClick={() => {
+            fallbackLock.current = false;
+            nextSource("Switching source.");
+          }}
+          className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-white transition hover:bg-white/10 disabled:opacity-40"
+        >
+          Try next player
         </button>
 
         <span className="text-xs text-white/40">
-          {source?.kind === "media"
-            ? "Native video / HLS"
-            : source?.kind === "iframe"
-              ? "Provider embed"
-              : "No source configured"}
+          {source ? `Player ${sourceIndex + 1} / ${sources.length} · ${source.kind}` : "No source"}
         </span>
       </div>
+
+      {error && (
+        <p role="status" className="text-sm text-red-400">
+          {error}
+        </p>
+      )}
 
       <div className="space-y-3">
         <div className="flex items-center justify-between gap-3">
@@ -313,30 +339,22 @@ export default function OfficialPlayer({
             type="button"
             disabled={selectedIndex <= 0}
             onClick={() => {
-              if (selectedIndex > 0) {
-                playEpisode(sortedEpisodes[selectedIndex - 1]);
-              }
+              if (selectedIndex > 0) playEpisode(sortedEpisodes[selectedIndex - 1]);
             }}
-            className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
+            className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white disabled:opacity-40"
           >
             Previous
           </button>
 
           <button
             type="button"
-            disabled={
-              selectedIndex < 0 ||
-              selectedIndex >= sortedEpisodes.length - 1
-            }
+            disabled={selectedIndex < 0 || selectedIndex >= sortedEpisodes.length - 1}
             onClick={() => {
-              if (
-                selectedIndex >= 0 &&
-                selectedIndex < sortedEpisodes.length - 1
-              ) {
+              if (selectedIndex >= 0 && selectedIndex < sortedEpisodes.length - 1) {
                 playEpisode(sortedEpisodes[selectedIndex + 1]);
               }
             }}
-            className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
+            className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white disabled:opacity-40"
           >
             Next
           </button>
@@ -367,21 +385,13 @@ export default function OfficialPlayer({
                   <span className="block font-medium">
                     Episode {episode.episodeNumber}
                   </span>
-                  <span className="mt-1 block opacity-70">
-                    {episode.title}
-                  </span>
+                  <span className="mt-1 block opacity-70">{episode.title}</span>
                 </button>
               );
             })}
           </div>
         )}
       </div>
-
-      {error && (
-        <p role="status" className="text-sm text-red-400">
-          {error}
-        </p>
-      )}
 
       {activeWatchUrl && (
         <a
@@ -395,8 +405,9 @@ export default function OfficialPlayer({
       )}
 
       <p className="text-xs text-white/50">
-        Playback requires an authorized source that permits your website to
-        access or embed it. HLS streams may also require suitable CORS headers.
+        Automatic fallback works for detectable media errors. Some third-party
+        embeds hide playback errors; use Try next player for those providers.
+        Sources must be authorized and permit embedding.
       </p>
     </section>
   );
