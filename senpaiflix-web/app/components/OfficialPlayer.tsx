@@ -5,12 +5,16 @@ import Hls from "hls.js";
 
 type PlayerProps = {
   title: string;
+  malId: number;
+  episodeCount?: number;
   embedUrl?: string;
   watchUrl?: string;
 };
 
 type Episode = {
-  animeTitle: string;
+  malId?: number;
+  metadataFallback?: boolean;
+  animeTitle?: string;
   episodeNumber: number;
   title: string;
   videoUrl?: string;
@@ -101,6 +105,8 @@ function safeWatchUrl(raw?: string) {
 
 export default function OfficialPlayer({
   title,
+  malId,
+  episodeCount = 0,
   embedUrl,
   watchUrl,
 }: PlayerProps) {
@@ -155,7 +161,7 @@ export default function OfficialPlayer({
 
       try {
         const response = await fetch(
-          `/api/episodes?title=${encodeURIComponent(title)}`,
+          `/api/episodes?malId=${encodeURIComponent(String(malId))}&count=${encodeURIComponent(String(episodeCount))}`,
           { cache: "no-store" }
         );
 
@@ -179,7 +185,7 @@ export default function OfficialPlayer({
     return () => {
       cancelled = true;
     };
-  }, [title, embedUrl, watchUrl]);
+  }, [title, malId, episodeCount, embedUrl, watchUrl]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -219,19 +225,45 @@ export default function OfficialPlayer({
     };
   }, [source?.url, source?.kind, retryCount, nextSource]);
 
-  function playEpisode(episode: Episode) {
-    const list = getSources(episode);
+  async function playEpisode(episode: Episode) {
+    setError("");
+    let resolvedEpisode = episode;
+
+    try {
+      const response = await fetch(
+        `/api/anime/stream?malId=${encodeURIComponent(String(malId))}&episode=${encodeURIComponent(String(episode.episodeNumber))}`,
+        { cache: "no-store" }
+      );
+      if (response.ok) {
+        const data = await response.json() as { sources?: string[]; watchUrl?: string | null };
+        resolvedEpisode = {
+          ...episode,
+          sources: [
+            ...(Array.isArray(episode.sources) ? episode.sources : []),
+            ...(Array.isArray(data.sources) ? data.sources : []),
+          ],
+          watchUrl: data.watchUrl || episode.watchUrl,
+        };
+      }
+    } catch {
+      // Keep locally configured episode sources if the lookup request fails.
+    }
+
+    const list = getSources(resolvedEpisode);
+    fallbackLock.current = false;
+    setSelected(`${episode.episodeNumber}:${episode.title}`);
 
     if (!list.length) {
-      setError("Is episode ke liye valid HTTPS MP4, HLS ya supported embed URL add karo.");
+      setSources([]);
+      setSourceIndex(0);
+      setActiveWatchUrl("");
+      setError("Is episode ka playable source configured nahi hai. data/episodes.json mein apna ya authorized HTTPS MP4, HLS, YouTube, ya Vimeo URL add karo.");
       return;
     }
 
-    fallbackLock.current = false;
     setSources(list);
     setSourceIndex(0);
-    setSelected(`${episode.episodeNumber}:${episode.title}`);
-    setActiveWatchUrl(safeWatchUrl(episode.watchUrl || episode.videoUrl));
+    setActiveWatchUrl(safeWatchUrl(resolvedEpisode.watchUrl || resolvedEpisode.videoUrl));
     setError("");
     setRetryCount((count) => count + 1);
   }

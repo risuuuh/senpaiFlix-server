@@ -20,6 +20,7 @@ const QUERY = `
         isAdult: false
       ) {
         id
+        idMal
         title { english romaji }
         description(asHtml: false)
         coverImage { extraLarge large }
@@ -88,8 +89,11 @@ export async function GET(request: Request) {
       );
     }
 
-    const anime = data.media.map((item: {
+    const anime = data.media
+      .filter((item: { idMal: number | null }) => Number.isInteger(item.idMal) && Number(item.idMal) > 0)
+      .map((item: {
       id: number;
+      idMal: number | null;
       title: { english: string | null; romaji: string };
       description: string | null;
       coverImage: { extraLarge: string | null; large: string | null };
@@ -99,7 +103,8 @@ export async function GET(request: Request) {
       genres: string[];
       trailer: { id: string | null; site: string | null; thumbnail: string | null } | null;
     }) => ({
-      id: item.id,
+      id: Number(item.idMal),
+      anilistId: item.id,
       title: item.title.english || item.title.romaji,
       description: item.description || "No description available.",
       image: item.coverImage.extraLarge || item.coverImage.large || "",

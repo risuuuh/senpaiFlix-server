@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SenpaiFlix - Automated Anime Streaming</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { background-color: #141318; color: #fff; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+
+        /* Layout */
+        .app-container { display: flex; height: 100vh; }
+
+        /* Sidebar (Episodes) */
+        .sidebar { width: 300px; background-color: #1c1b22; border-right: 1px solid #282730; display: flex; flex-direction: column; }
+        .sidebar-header { padding: 20px; border-bottom: 1px solid #282730; text-align: center; }
+        .sidebar-header h1 { color: #ffbade; font-size: 24px; }
+        .sidebar-header p { color: #888; font-size: 12px; }
+
+        .episode-list-container { flex: 1; overflow-y: auto; padding: 15px; }
+        .episode-list-container h3 { font-size: 16px; margin-bottom: 15px; color: #aaa; }
+        .ep-list { list-style: none; }
+        .ep-item { padding: 12px 15px; background-color: #282730; margin-bottom: 8px; border-radius: 6px; cursor: pointer; transition: 0.2s; font-size: 14px; display: flex; justify-content: space-between; align-items: center; }
+        .ep-item:hover, .ep-item.active { background-color: #ffbade; color: #000; font-weight: bold; }
+
+        /* Main Content (Player) */
+        .main-content { flex: 1; display: flex; flex-direction: column; background-color: #141318; }
+
+        /* Player Section */
+        .player-section { flex: 1; padding: 30px; display: flex; flex-direction: column; }
+        .player-wrapper { position: relative; width: 100%; padding-bottom: 56.25%; /* 16:9 Ratio */ background-color: #000; border-radius: 12px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+        .player-wrapper iframe { position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: none; }
+
+        /* Control Bar (Servers) */
+        .control-bar { margin-top: 20px; background-color: #1c1b22; padding: 15px 25px; border-radius: 10px; display: flex; justify-content: space-between; align-items: center; }
+        .anime-meta h2 { font-size: 20px; color: #fff; }
+        .anime-meta p { color: #888; font-size: 14px; }
+
+        .server-selection { display: flex; align-items: center; gap: 10px; }
+        .server-label { color: #aaa; font-size: 14px; }
+        .server-buttons { display: flex; gap: 8px; }
+        .server-btn { background-color: #282730; color: #fff; border: 1px solid #444; padding: 8px 16px; border-radius: 6px; cursor: pointer; transition: 0.2s; font-size: 13px; }
+        .server-btn.active, .server-btn:hover { background-color: #ffbade; color: #000; border-color: #ffbade; font-weight: bold; }
+
+    </style>
+</head>
+<body>
+
+    <div class="app-container">
+        <!-- Sidebar: Episode List -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <h1>SENPAIFLIX</h1>
+                <p>Automated Anime Streaming</p>
+            </div>
+            <div class="episode-list-container">
+                <h3>Episodes</h3>
+                <ul class="ep-list" id="episodeList">
+                    <!-- Episodes will be loaded dynamically -->
+                    <li class="ep-item loading">Loading...</li>
+                </ul>
+            </div>
+        </aside>
+
+        <!-- Main Content: Player & Controls -->
+        <main class="main-content">
+            <div class="player-section">
+                <div class="player-wrapper">
+                    <iframe id="animeIframe" src="" allowfullscreen></iframe>
+                </div>
+
+                <div class="control-bar">
+                    <div class="anime-meta">
+                        <h2 id="currentAnimeTitle">Select an Anime</h2>
+                        <p>Watching Episode: <span id="currentEpisodeDisplay">--</span></p>
+                    </div>
+                    <div class="server-selection">
+                        <span class="server-label">Server:</span>
+                        <div class="server-buttons" id="serverButtons">
+                            <!-- Servers will be loaded dynamically -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        // --- CONFIGURATION ---
+        const backendUrl = 'http://localhost:5000'; // Aapka Node.js server URL
+        const defaultAnimeId = 'tokyo-revengers';    // Initial anime load karne ke liye
+        const totalEpisodes = 24;                  // Ye automated bhi ho sakta hai, abhi manual rakhte hain
+
+        // --- STATE ---
+        let currentAnimeId = defaultAnimeId;
+        let currentEpisode = 1;
+        let serversData = [];
+
+        // --- ELEMENTS ---
+        const epListContainer = document.getElementById('episodeList');
+        const iframe = document.getElementById('animeIframe');
+        const serverButtonsContainer = document.getElementById('serverButtons');
+        const animeTitleDisplay = document.getElementById('currentAnimeTitle');
+        const episodeDisplay = document.getElementById('currentEpisodeDisplay');
+
+        // --- FUNCTIONS ---
+
+        // 1. Setup Initial State
+        function init() {
+            animeTitleDisplay.innerText = currentAnimeId.replace(/-/g, ' ').toUpperCase();
+            generateEpisodeList();
+            loadEpisode(1);
+        }
+
+        // 2. Dynamic Episode List Generation
+        function generateEpisodeList() {
+            epListContainer.innerHTML = ''; // Clear loading
+            for (let i = 1; i <= totalEpisodes; i++) {
+                const li = document.createElement('li');
+                li.className = `ep-item ${i === 1 ? 'active' : ''}`;
+                li.innerHTML = `<span>Episode ${i}</span> <span class="ep-num">#${i}</span>`;
+                li.onclick = () => selectEpisode(i, li);
+                epListContainer.appendChild(li);
+            }
+        }
+
+        // 3. Select Episode Event
+        function selectEpisode(epNum, element) {
+            currentEpisode = epNum;
+
+            // UI Update
+            document.querySelectorAll('.ep-item').forEach(el => el.classList.remove('active'));
+            element.classList.add('active');
+
+            loadEpisode(epNum);
+        }
+
+        // 4. Load Episode Stream Data from Backend
+        async function loadEpisode(epNum) {
+            episodeDisplay.innerText = epNum;
+            iframe.src = ''; // Clear previous
+
+            try {
+                // Backend se data fetch karein
+                const response = await fetch(`${backendUrl}/api/anime/${currentAnimeId}/episodes`);
+                const data = await response.json();
+
+                if (data.success) {
+                    serversData = data.servers;
+                    renderServerButtons();
+
+                    // Default pehla server load karein
+                    if (serversData.length > 0) {
+                        loadPlayer(serversData[0].embedUrl);
+                    }
+                } else {
+                    console.error("Backend error:", data.error);
+                }
+            } catch (error) {
+                console.error("Failed to connect to backend:", error);
+            }
+        }
+
+        // 5. Render Server Switching Buttons
+        function renderServerButtons() {
+            serverButtonsContainer.innerHTML = '';
+            serversData.forEach((server, index) => {
+                const btn = document.createElement('button');
+                btn.className = `server-btn ${index === 0 ? 'active' : ''}`;
+                btn.innerText = server.name;
+                btn.onclick = () => {
+                    // UI Update
+                    document.querySelectorAll('.server-btn').forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+
+                    loadPlayer(server.embedUrl);
+                };
+                serverButtonsContainer.appendChild(btn);
+            });
+        }
+
+        // 6. Load URL into Iframe
+        function loadPlayer(embedUrl) {
+            // Hum embed URL ke aage episode number add kar dete hain agar automated API support kare
+            // Abhi ke liye hum backend wale base URL ko hi use karte hain.
+            // Agar vidsrc use kar rahe hain toh template change karna hoga.
+
+            // Example: Agar vidsrc support karta hai toh embedUrl.replace('/anime/', `/anime/${currentEpisode}`)
+            // Lekin abhi jo backend code diya hai wo simple base URL return kar raha hai.
+
+            iframe.src = embedUrl;
+        }
+
+        // Start everything
+        init();
+
+    </script>
+</body>
+</html>

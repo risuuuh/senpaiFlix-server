@@ -3,6 +3,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
+import OfficialPlayer from "./components/OfficialPlayer";
 import {
   Search,
   Play,
@@ -20,7 +21,8 @@ import {
 } from "lucide-react";
 
 type Anime = {
-  id: number;
+  id: number; // MyAnimeList ID
+  anilistId?: number;
   title: string;
   genre: string;
   year: string;
@@ -35,7 +37,7 @@ type Anime = {
 
 const FALLBACK_ANIME: Anime[] = [
   {
-    id: 1,
+    id: 52299,
     title: "Solo Leveling",
     genre: "Action · Fantasy",
     year: "2024",
@@ -46,7 +48,7 @@ const FALLBACK_ANIME: Anime[] = [
       "A weak hunter discovers a mysterious system that allows him to become stronger.",
   },
   {
-    id: 2,
+    id: 16498,
     title: "Attack on Titan",
     genre: "Action · Drama",
     year: "2013",
@@ -57,7 +59,7 @@ const FALLBACK_ANIME: Anime[] = [
       "Humanity fights for survival behind enormous walls in a world threatened by Titans.",
   },
   {
-    id: 3,
+    id: 38000,
     title: "Demon Slayer",
     genre: "Action · Supernatural",
     year: "2019",
@@ -68,7 +70,7 @@ const FALLBACK_ANIME: Anime[] = [
       "A young swordsman begins a journey to save his sister and defeat demons.",
   },
   {
-    id: 4,
+    id: 40748,
     title: "Jujutsu Kaisen",
     genre: "Action · Dark Fantasy",
     year: "2020",
@@ -79,7 +81,7 @@ const FALLBACK_ANIME: Anime[] = [
       "A student enters the dangerous world of curses and powerful sorcerers.",
   },
   {
-    id: 5,
+    id: 1535,
     title: "Death Note",
     genre: "Thriller · Mystery",
     year: "2006",
@@ -90,7 +92,7 @@ const FALLBACK_ANIME: Anime[] = [
       "A student discovers a supernatural notebook and faces a legendary detective.",
   },
   {
-    id: 6,
+    id: 30276,
     title: "One Punch Man",
     genre: "Action · Comedy",
     year: "2015",
@@ -101,7 +103,7 @@ const FALLBACK_ANIME: Anime[] = [
       "An overwhelmingly powerful hero searches for a worthy challenge.",
   },
   {
-    id: 7,
+    id: 44511,
     title: "Chainsaw Man",
     genre: "Action · Fantasy",
     year: "2022",
@@ -112,7 +114,7 @@ const FALLBACK_ANIME: Anime[] = [
       "A young devil hunter's life changes after an extraordinary transformation.",
   },
   {
-    id: 8,
+    id: 32281,
     title: "Your Name",
     genre: "Romance · Fantasy",
     year: "2016",
@@ -139,14 +141,13 @@ function cleanDescription(value: unknown): string {
     .trim();
 }
 
-function normalizeAnime(
-  item: Record<string, unknown>,
-  index: number
-): Anime | null {
+function normalizeAnime(item: Record<string, unknown>): Anime | null {
   const title = item.title;
   const image = item.image ?? item.coverImage;
 
-  if (typeof title !== "string" || typeof image !== "string") {
+  const malId = Number(item.id);
+
+  if (typeof title !== "string" || typeof image !== "string" || !Number.isInteger(malId) || malId <= 0) {
     return null;
   }
 
@@ -157,7 +158,8 @@ function normalizeAnime(
       : String(item.genre ?? "Anime");
 
   return {
-    id: Number(item.id) || index + 1,
+    id: malId,
+    anilistId: Number(item.anilistId) || undefined,
     title,
     genre: genres,
     year: String(item.year ?? "Unknown"),
@@ -246,9 +248,9 @@ export default function Home() {
         if (cancelled || !Array.isArray(data.anime)) return;
 
         const results = data.anime
-          .map((item: unknown, index: number) => {
+          .map((item: unknown) => {
             if (typeof item !== "object" || item === null) return null;
-            return normalizeAnime(item as Record<string, unknown>, index);
+            return normalizeAnime(item as Record<string, unknown>);
           })
           .filter((item: Anime | null): item is Anime => item !== null);
 
@@ -300,9 +302,9 @@ export default function Home() {
       if (!Array.isArray(data.anime)) return;
 
       const results = data.anime
-        .map((item: unknown, index: number) => {
+        .map((item: unknown) => {
           if (typeof item !== "object" || item === null) return null;
-          return normalizeAnime(item as Record<string, unknown>, index);
+          return normalizeAnime(item as Record<string, unknown>);
         })
         .filter((item: Anime | null): item is Anime => item !== null);
 
@@ -389,6 +391,12 @@ export default function Home() {
             >
               <Bookmark className="mr-1 inline" size={15} /> My List
             </button>
+            <a
+              href="/public-domain"
+              className="transition hover:text-white"
+            >
+              <ShieldCheck className="mr-1 inline" size={15} /> Public Domain
+            </a>
           </div>
 
           <label className="flex w-36 items-center gap-2 rounded-full border border-white/10 bg-white/[0.05] px-3 py-2 transition focus-within:border-white/30 sm:w-52">
@@ -459,6 +467,13 @@ export default function Home() {
               <Bookmark className="mr-2 inline" size={16} />
               My watchlist
             </button>
+            <a
+              href="/public-domain"
+              className="rounded-full border border-white/15 bg-white/[0.05] px-6 py-3 text-sm transition hover:bg-white/10"
+            >
+              <ShieldCheck className="mr-2 inline" size={16} />
+              Public-domain library
+            </a>
           </div>
 
           <div className="mt-9 flex flex-wrap items-center gap-5 text-xs text-white/40">
@@ -759,56 +774,12 @@ export default function Home() {
               </div>
 
               <div className="border-t border-white/10 p-6 sm:p-8">
-                {(() => {
-                  const raw = selected.embedUrl || selected.watchUrl || selected.trailerUrl || "";
-                  let src = "";
-
-                  try {
-                    const url = new URL(raw);
-                    const host = url.hostname.toLowerCase();
-
-                    if (host === "youtu.be") {
-                      const id = url.pathname.split("/").filter(Boolean)[0];
-                      if (id) src = `https://www.youtube-nocookie.com/embed/${id}`;
-                    } else if (
-                      ["youtube.com", "www.youtube.com", "m.youtube.com"].includes(host)
-                    ) {
-                      const id = url.pathname === "/watch"
-                        ? url.searchParams.get("v")
-                        : url.pathname.startsWith("/embed/")
-                          ? url.pathname.split("/")[2]
-                          : null;
-                      if (id) src = `https://www.youtube-nocookie.com/embed/${id}`;
-                    } else if (
-                      host === "www.youtube-nocookie.com" &&
-                      url.pathname.startsWith("/embed/")
-                    ) {
-                      src = url.href;
-                    } else if (
-                      host === "player.vimeo.com" &&
-                      url.pathname.startsWith("/video/")
-                    ) {
-                      src = url.href;
-                    }
-                  } catch {}
-
-                  return src ? (
-                    <div className="aspect-video w-full overflow-hidden rounded-2xl border border-white/10 bg-black">
-                      <iframe
-                        src={src}
-                        title={`${selected.title} embedded video`}
-                        className="h-full w-full"
-                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                        allowFullScreen
-                        referrerPolicy="strict-origin-when-cross-origin"
-                      />
-                    </div>
-                  ) : (
-                    <div className="flex aspect-video w-full items-center justify-center rounded-2xl border border-white/10 bg-white/[0.03] p-6 text-center text-sm text-white/60">
-                      Embedded video source abhi configured nahi hai.
-                    </div>
-                  );
-                })()}
+                <OfficialPlayer
+                  key={selected.id}
+                  title={selected.title}
+                  malId={selected.id}
+                  episodeCount={selected.episodes}
+                />
               </div>
             </motion.div>
           </motion.div>

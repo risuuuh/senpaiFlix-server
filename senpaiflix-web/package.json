@@ -9,7 +9,9 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "dotenv": "^18.0.8",
     "framer-motion": "^14.3.0",
+    "grammy": "^1.46.0",
     "hls.js": "^1.7.3",
     "lucide-react": "^1.59.0",
     "next": "16.4.2",
@@ -25,6 +27,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.4.2",
     "tailwindcss": "^4",
+    "tsx": "^4.23.15",
     "typescript": "^5"
   }
 }
